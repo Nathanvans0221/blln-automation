@@ -1,0 +1,48 @@
+Option Explicit
+Sub AuditMixLinks()
+
+    '----- source & new sheet -----
+    Dim ws As Worksheet:    Set ws = Worksheets("Output")          '<< change if needed
+    Dim wsA As Worksheet
+    
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    Worksheets("Audit").Delete        'delete old audit sheet if it exists
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+    
+    Set wsA = Worksheets.Add(After:=ws)
+    wsA.Name = "Audit"
+    
+    '----- headers -----
+    wsA.Range("A1:E1").Value = Array("RecipeID", "Location", "ProductionItem", "SumMix", "Flag")
+    
+    '----- build % totals by RecipeID|Location|ProductionItem -----
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastRow
+        Dim k As String
+        k = ws.Cells(r, "B").Value & "|" & ws.Cells(r, "I").Value & "|" & ws.Cells(r, "H").Value   'B=RecipeID, I=Location, H=ProductionItem
+        dict(k) = dict(k) + ws.Cells(r, "D").Value    'D = MixPct
+    Next r
+    
+    '----- drop results -----
+    Dim aRow As Long: aRow = 2
+    Dim key As Variant
+    For Each key In dict.Keys
+        Dim parts() As String: parts = Split(key, "|")
+        wsA.Cells(aRow, 1).Resize(1, 3).Value = parts          'RecipeID / Location / ProdItem
+        wsA.Cells(aRow, 4).Value = dict(key)                    'Sum of Mix %
+        wsA.Cells(aRow, 5).Value = IIf(Abs(dict(key) - 100) > 0.01, "CHECK", "OK")
+        aRow = aRow + 1
+    Next key
+    
+    '----- tidy -----
+    wsA.Columns.AutoFit
+    wsA.Range("A1").CurrentRegion.AutoFilter Field:=5, Criteria1:="CHECK"  'show only problems
+    
+    MsgBox "Audit complete – review rows filtered in 'Audit'.", vbInformation
+End Sub
+

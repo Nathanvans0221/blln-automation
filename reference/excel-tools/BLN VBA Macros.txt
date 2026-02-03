@@ -1,0 +1,184 @@
+Option Explicit
+'=====================================================================
+'  GenerateImportFile
+'  ------------------------------------------------------------------
+'  • Reads “Recipes” and “Schemes”
+'  • Merges extra phases (SPACE/HANG/…) into the GROW rows
+'  • Writes a consolidated ImportFile sheet
+'=====================================================================
+
+Sub GenerateImportFile()
+
+    '----- worksheet handles ------------------------------------------
+    Dim wsSchemes As Worksheet, wsRecipes As Worksheet, wsOutput As Worksheet
+    Set wsSchemes = ThisWorkbook.Sheets("Schemes")
+    Set wsRecipes = ThisWorkbook.Sheets("Recipes")
+    
+    On Error Resume Next
+    Set wsOutput = ThisWorkbook.Sheets("ImportFile")
+    If wsOutput Is Nothing Then Set wsOutput = ThisWorkbook.Sheets.Add
+    wsOutput.Name = "ImportFile"
+    On Error GoTo 0
+    
+    '----- header ------------------------------------------------------
+    wsOutput.Cells.Clear
+    wsOutput.Range("A1:J1").Value = Array( _
+        "Location", "Category", "Scheme Code", "Genus", "Series", "Color", _
+        "Start Week", "End Week", "Grow Weeks", "Notes")
+    
+    '----- cache Schemes in a dictionary ------------------------------
+    Dim schemeDict As Object
+    Set schemeDict = BuildSchemeDictionary(wsSchemes)
+    
+    '----- column map for Recipes -------------------------------------
+    Const COL_LOCATION   As Long = 1
+    Const COL_CATEGORY   As Long = 4
+    Const COL_GENUS      As Long = 5
+    Const COL_SERIES     As Long = 6
+    Const COL_COLOR      As Long = 7
+    Const COL_SCHEMECODE As Long = 13      ' Notes column
+    
+    Dim recipeLastRow As Long
+    recipeLastRow = wsRecipes.Cells(wsRecipes.rows.Count, "A").End(xlUp).Row
+    
+    '----- gather output rows in a Collection -------------------------
+    Dim rowsOut As New Collection
+    Dim r As Long, schemeCode As String
+    
+    For r = 2 To recipeLastRow
+        
+        schemeCode = Trim$(wsRecipes.Cells(r, COL_SCHEMECODE).Value)
+        If Len(schemeCode) = 0 Then GoTo NextRecipe
+        If Not schemeDict.Exists(schemeCode) Then GoTo NextRecipe
+        
+        Dim merged() As Variant
+        merged = MergeGrowAndSpace(schemeDict(schemeCode))
+        
+        Dim m As Long, noteText As String
+        For m = LBound(merged, 1) To UBound(merged, 1)
+            
+            noteText = "Extra=" & merged(m, 4)   ' for debugging; delete if unwanted
+            
+' Build one output row:
+'   (1) Location  (2) Category  (3) Scheme Code
+'   (4) Genus     (5) Series    (6) Color
+'   (7) StartW    (8) EndW      (9) GrowWks   (10) Notes
+rowsOut.Add Array( _
+    wsRecipes.Cells(r, COL_LOCATION).Value, _
+    wsRecipes.Cells(r, COL_CATEGORY).Value, _
+    schemeCode, _
+    wsRecipes.Cells(r, COL_GENUS).Value, _
+    wsRecipes.Cells(r, COL_SERIES).Value, _
+    wsRecipes.Cells(r, COL_COLOR).Value, _
+    merged(m, 1), _
+    merged(m, 2), _
+    merged(m, 3), _
+    noteText)
+
+        Next m
+        
+NextRecipe:
+    Next r
+    
+    '----- dump to ImportFile in one go --------------------------------
+    If rowsOut.Count > 0 Then
+        Dim outArr() As Variant, i As Long, arr As Variant
+        ReDim outArr(1 To rowsOut.Count, 1 To 10)
+        For i = 1 To rowsOut.Count
+            arr = rowsOut(i)
+            outArr(i, 1) = arr(0): outArr(i, 2) = arr(1): outArr(i, 3) = arr(2)
+            outArr(i, 4) = arr(3): outArr(i, 5) = arr(4): outArr(i, 6) = arr(5)
+            outArr(i, 7) = arr(6): outArr(i, 8) = arr(7): outArr(i, 9) = arr(8)
+            outArr(i, 10) = arr(9)
+        Next i
+        wsOutput.Range("A2").Resize(rowsOut.Count, 10).Value = outArr
+    End If
+    
+    MsgBox "Import File Generated Successfully!", vbInformation
+End Sub
+
+'=====================================================================
+'  MergeGrowAndSpace
+'  • Collapses EXTRA phases (anything not GROW) into the GROW rules
+'  • Returns 2-D array: [row,1]=Start, [2]=End, [3]=Combined, [4]=ExtraOnly
+'=====================================================================
+Private Function MergeGrowAndSpace(colRules As Collection) As Variant
+    
+    '--- collect break-points -----------------------------------------
+    Dim bpDict As Object: Set bpDict = CreateObject("Scripting.Dictionary")
+    Dim i As Long, rule As Variant, s As Long, e As Long
+    
+    For i = 1 To colRules.Count
+        rule = colRules(i)
+        s = CLng(rule(1)): e = CLng(rule(2)) + 1
+        If Not bpDict.Exists(s) Then bpDict.Add s, True
+        If e <= 54 And Not bpDict.Exists(e) Then bpDict.Add e, True
+    Next i
+    If Not bpDict.Exists(54) Then bpDict.Add 54, True   ' sentinel
+    
+    '--- sort break-points (tiny list ? bubble sort) -------------------
+    Dim bps() As Long: ReDim bps(1 To bpDict.Count)
+    i = 1
+    Dim k As Variant, tmp As Long, swapped As Boolean, j As Long
+    For Each k In bpDict.Keys: bps(i) = k: i = i + 1: Next k
+    Do
+        swapped = False
+        For i = LBound(bps) To UBound(bps) - 1
+            If bps(i) > bps(i + 1) Then
+                tmp = bps(i): bps(i) = bps(i + 1): bps(i + 1) = tmp
+                swapped = True
+            End If
+        Next i
+    Loop While swapped
+    
+    '--- build merged segments ----------------------------------------
+    Dim rows As New Collection
+    Dim segStart As Long, segEnd As Long, growWks As Long, extraWks As Long
+    
+    For i = LBound(bps) To UBound(bps) - 1
+        segStart = bps(i): segEnd = bps(i + 1) - 1
+        If segStart > segEnd Then GoTo NextSeg
+        
+        growWks = -1: extraWks = 0
+        
+        ' find covering GROW
+        For Each rule In colRules
+            If rule(4) = "GROW" Then
+                If segStart >= rule(1) And segEnd <= rule(2) Then
+                    growWks = rule(3): Exit For
+                End If
+            End If
+        Next rule
+        If growWks = -1 Then GoTo NextSeg   ' skip gaps
+        
+        ' sum covering EXTRA phases
+        For Each rule In colRules
+            If rule(4) <> "GROW" Then
+                If segStart >= rule(1) And segEnd <= rule(2) Then
+                    extraWks = extraWks + rule(3)
+                End If
+            End If
+        Next rule
+        
+        rows.Add Array(segStart, segEnd, growWks + extraWks, extraWks)
+NextSeg:
+    Next i
+    
+    '--- Collection ? 2-D array ---------------------------------------
+    Dim out() As Variant
+    If rows.Count = 0 Then
+        ReDim out(1 To 1, 1 To 4)
+    Else
+        ReDim out(1 To rows.Count, 1 To 4)
+        Dim r As Long, arr As Variant
+        For r = 1 To rows.Count
+            arr = rows(r)
+            out(r, 1) = arr(0): out(r, 2) = arr(1)
+            out(r, 3) = arr(2): out(r, 4) = arr(3)
+        Next r
+    End If
+    
+    MergeGrowAndSpace = out
+End Function
+
+

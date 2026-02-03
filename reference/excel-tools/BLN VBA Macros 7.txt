@@ -1,0 +1,102 @@
+Option Explicit
+Sub AuditUnlinkedMixRows()
+
+    '———————— sheet handles ————————
+    Dim wsMix As Worksheet:    Set wsMix = Worksheets("MixData")
+    Dim wsOut As Worksheet:    Set wsOut = Worksheets("Output")
+    Dim wsRec As Worksheet:    Set wsRec = Worksheets("RecipeData")
+    Dim wsCat As Worksheet:    Set wsCat = Worksheets("CatalogData")
+    
+    Dim wsU As Worksheet
+    On Error Resume Next: Application.DisplayAlerts = False
+    Worksheets("Unlinked").Delete
+    Application.DisplayAlerts = True: On Error GoTo 0
+    Set wsU = Worksheets.Add(After:=wsOut)
+    wsU.Name = "Unlinked"
+    
+    wsU.Range("A1:H1").Value = _
+      Array("Location", "CommonItem", "ProductionItem", "Variant", _
+            "FirstWeek", "Reason", "RecipeID Tried", "Catalog Tried")
+    
+    '———————— dictionary of linked (Loc|Variant) ————————
+    Dim dictLinked As Object: Set dictLinked = CreateObject("Scripting.Dictionary")
+    Dim lrOut&, rOut&
+    lrOut = wsOut.Cells(wsOut.Rows.Count, "A").End(xlUp).Row
+    
+    For rOut = 2 To lrOut
+        Dim keyL As String
+        keyL = wsOut.Cells(rOut, "I").Value & "|" & wsOut.Cells(rOut, "G").Value ' Loc|Variant
+        dictLinked(keyL) = True
+    Next rOut
+    
+    '———————— recipe range lookup —————————
+    Dim dictRange As Object: Set dictRange = CreateObject("Scripting.Dictionary")
+    Dim lrRec&, rRec&
+    lrRec = wsRec.Cells(wsRec.Rows.Count, "A").End(xlUp).Row
+    For rRec = 2 To lrRec
+        dictRange(wsRec.Cells(rRec, "A").Value) = _
+            Array(Val(wsRec.Cells(rRec, "C").Value), Val(wsRec.Cells(rRec, "D").Value))
+    Next rRec
+    
+    '———————— scan MixData ————————————
+    Dim lrMix&, rMix&, uRow&, startCol&
+    lrMix = wsMix.Cells(wsMix.Rows.Count, "A").End(xlUp).Row
+    startCol = 6     ' column F is week 1
+    uRow = 2
+    
+    Dim loc$, cItem$, prod$, varCode$
+    For rMix = 2 To lrMix
+        
+        loc = wsMix.Cells(rMix, "A").Value
+        cItem = wsMix.Cells(rMix, "C").Value
+        prod = wsMix.Cells(rMix, "D").Value
+        varCode = wsMix.Cells(rMix, "E").Value
+        
+        Dim keyChk As String: keyChk = loc & "|" & varCode
+        If dictLinked.Exists(keyChk) Then GoTo NextMixRow   ' already linked
+        
+        '—— find first non-zero week to test ——
+        Dim wkCol&, firstWeek&
+        firstWeek = 0
+        For wkCol = startCol To startCol + 52
+            If wsMix.Cells(rMix, wkCol).Value > 0 Then
+                firstWeek = wsMix.Cells(1, wkCol).Value
+                Exit For
+            End If
+        Next wkCol
+        If firstWeek = 0 Then GoTo NextMixRow   ' row is all zeros
+        
+        '—— attempt to pick a recipe & catalog ——
+        Dim genusOut, seriesOut
+        Dim tryRecipe As Variant
+        tryRecipe = PickBestRecipe(wsRec, loc, prod, firstWeek, genusOut, seriesOut)
+        
+        Dim reason$, tryCatalog
+        If tryRecipe = "" Then
+            reason = "No recipe in range"
+        Else
+            tryCatalog = LookupCatalog(wsCat, genusOut, seriesOut, varCode)
+            If tryCatalog = "" Then
+                reason = "No catalog match"
+            Else
+                reason = "Macro skipped? (unknown)"
+            End If
+        End If
+        
+        '—— write to Unlinked ——'
+        wsU.Cells(uRow, 1).Resize(1, 4).Value = Array(loc, cItem, prod, varCode)
+        wsU.Cells(uRow, 5).Value = firstWeek
+        wsU.Cells(uRow, 6).Value = reason
+        wsU.Cells(uRow, 7).Value = tryRecipe
+        wsU.Cells(uRow, 8).Value = tryCatalog
+        uRow = uRow + 1
+        
+NextMixRow:
+    Next rMix
+    
+    If uRow = 2 Then wsU.Cells(2, 1).Value = "Everything linked – nice!"
+    wsU.Columns.AutoFit
+    MsgBox "Reverse audit done – see 'Unlinked' sheet.", vbInformation
+End Sub
+
+

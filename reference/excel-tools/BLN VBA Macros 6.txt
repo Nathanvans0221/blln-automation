@@ -1,0 +1,86 @@
+Option Explicit
+Sub AuditCommonItemWeeks()
+
+    '-----------------------------------------------------------
+    ' 1.  Sheet references
+    '-----------------------------------------------------------
+    Dim wsOut As Worksheet:    Set wsOut = Worksheets("Output")      ' breakout rows
+    Dim wsRec As Worksheet:    Set wsRec = Worksheets("RecipeData")  ' recipe master
+    Dim wsA   As Worksheet
+    
+    On Error Resume Next
+    Application.DisplayAlerts = False
+    Worksheets("AuditWeeks").Delete          ' remove old audit sheet if it exists
+    Application.DisplayAlerts = True
+    On Error GoTo 0
+    
+    Set wsA = Worksheets.Add(After:=wsOut)
+    wsA.Name = "AuditWeeks"
+    
+    wsA.Range("A1:E1").Value = _
+        Array("Location", "CommonItem", "Week", "SumMix", "Flag")
+    
+    '-----------------------------------------------------------
+    ' 2.  Build dictionary: RecipeID ? (StartWeek, EndWeek)
+    '-----------------------------------------------------------
+    Dim dictRange As Object: Set dictRange = CreateObject("Scripting.Dictionary")
+    Dim lrRec As Long: lrRec = wsRec.Cells(wsRec.Rows.Count, "A").End(xlUp).Row
+    
+    Dim rRec As Long
+    For rRec = 2 To lrRec
+        dictRange(wsRec.Cells(rRec, "A").Value) = _
+            Array(Val(wsRec.Cells(rRec, "C").Value), Val(wsRec.Cells(rRec, "D").Value))
+    Next rRec
+    
+    '-----------------------------------------------------------
+    ' 3.  Accumulate MixPct per (Loc|CommonItem|Week)
+    '-----------------------------------------------------------
+    Dim dictW As Object: Set dictW = CreateObject("Scripting.Dictionary")
+    Dim lrOut As Long: lrOut = wsOut.Cells(wsOut.Rows.Count, "A").End(xlUp).Row
+    
+    Dim rOut As Long
+    For rOut = 2 To lrOut
+        Dim loc As String:      loc = wsOut.Cells(rOut, "I").Value     ' Location
+        Dim cItem As String:    cItem = wsOut.Cells(rOut, "E").Value   ' CommonItem
+        Dim recipeID As Variant: recipeID = wsOut.Cells(rOut, "B").Value
+        Dim pct As Double:      pct = wsOut.Cells(rOut, "D").Value     ' MixPct 0-100
+        
+        If dictRange.Exists(recipeID) Then
+            Dim rng: rng = dictRange(recipeID)          ' (Start, End)
+            Dim startW As Long: startW = IIf(rng(0) = 0, 1, rng(0))
+            Dim endW   As Long: endW = IIf(rng(1) = 0, 53, rng(1))
+            
+            Dim w As Long, key As String
+            For w = startW To endW
+                key = loc & "|" & cItem & "|" & w
+                dictW(key) = dictW(key) + pct
+            Next w
+        End If
+    Next rOut
+    
+    '-----------------------------------------------------------
+    ' 4.  Dump only weeks whose total ? 100 %
+    '-----------------------------------------------------------
+    Dim aRow As Long: aRow = 2
+    Dim parts() As String
+    Dim k As Variant
+    
+    For Each k In dictW.Keys
+        If Abs(dictW(k) - 100) > 0.01 Then
+            parts = Split(k, "|")                ' parts(0)=Loc, parts(1)=CommonItem, parts(2)=Week)
+            wsA.Cells(aRow, 1).Resize(1, 3).Value = parts
+            wsA.Cells(aRow, 4).Value = dictW(k)  ' SumMix
+            wsA.Cells(aRow, 5).Value = "CHECK"
+            aRow = aRow + 1
+        End If
+    Next k
+    
+    If aRow = 2 Then
+        wsA.Cells(2, 1).Value = "No issues – all weeks hit 100 %"
+    End If
+    
+    wsA.Columns.AutoFit
+    MsgBox "Week-level audit finished.  See 'AuditWeeks'.", vbInformation
+End Sub
+
+

@@ -1,0 +1,156 @@
+'=====================================================================
+'  GenerateMixBreakoutOutput  • 2025-06-20  (includes Location column)
+'=====================================================================
+Option Explicit
+
+'––– tweak these names / settings if your workbook differs –––––
+Private Const SHT_MIX     As String = "MixData"
+Private Const SHT_RECIPE  As String = "RecipeData"
+Private Const SHT_CATALOG As String = "CatalogData"
+Private Const SHT_OUTPUT  As String = "Output"
+Private Const HDR_ROW     As Long = 1    'row containing week numbers
+Private Const WK1_COL     As Long = 6    'column F = week 1
+'——————————————————————————————————————————————————————
+
+Sub GenerateMixBreakoutOutput()
+
+    '— sheet handles —
+    Dim wsMix As Worksheet:     Set wsMix = Worksheets(SHT_MIX)
+    Dim wsRecipe As Worksheet:  Set wsRecipe = Worksheets(SHT_RECIPE)
+    Dim wsCatalog As Worksheet: Set wsCatalog = Worksheets(SHT_CATALOG)
+    Dim wsOut As Worksheet:     Set wsOut = Worksheets(SHT_OUTPUT)
+    
+    '— prepare Output —
+    wsOut.Cells.ClearContents
+    wsOut.Range("A1:H1").Value = _
+        Array("ID", "RecipeID", "CatalogID", "MixPct", "CommonItem", "Location", "Note", "Variant")
+    
+    Dim idCtr As Long:  idCtr = 1
+    Dim outRow As Long: outRow = 2
+    
+    '— MixData limits —
+    Dim lastRowMix As Long: lastRowMix = wsMix.Cells(wsMix.Rows.Count, "A").End(xlUp).Row
+    Dim lastColMix As Long: lastColMix = wsMix.Cells(HDR_ROW, wsMix.Columns.Count).End(xlToLeft).Column
+    
+    Dim r As Long, c As Long
+    
+    '================ main loop =================
+    For r = 2 To lastRowMix
+    
+        '—— row info ——
+        Dim loc$, commonItem$, prod$, varCode$
+        loc = Trim$(wsMix.Cells(r, "A").Value)
+        commonItem = Trim$(wsMix.Cells(r, "C").Value)
+        prod = Trim$(wsMix.Cells(r, "D").Value)
+        varCode = Trim$(wsMix.Cells(r, "E").Value)
+        
+        Dim dictBound As Object: Set dictBound = GetRecipeBoundaries(wsRecipe, loc, prod)
+        
+        Dim currentPct As Variant: currentPct = wsMix.Cells(r, WK1_COL).Value
+        Dim startCol As Long:      startCol = WK1_COL
+        
+        For c = WK1_COL To lastColMix + 1     ' +1 sentinel
+            
+            Dim pct As Variant
+            pct = IIf(c <= lastColMix, wsMix.Cells(r, c).Value, -1)
+            
+            Dim hitBoundary As Boolean
+            If c <= lastColMix Then
+                Dim wk As Long: wk = Val(wsMix.Cells(HDR_ROW, c).Value)
+                hitBoundary = dictBound.Exists(wk)
+            End If
+            
+            If pct <> currentPct Or hitBoundary Or c = lastColMix + 1 Then
+                
+                If IsNumeric(currentPct) And currentPct > 0 Then
+                    
+                    Dim firstWk As Long: firstWk = Val(wsMix.Cells(HDR_ROW, startCol).Value)
+                    
+                    Dim bestGenus, bestSeries, bestID As Variant
+                    bestID = PickBestRecipe(wsRecipe, loc, prod, firstWk, bestGenus, bestSeries)
+                    
+                    Dim catalogID As Variant, note$
+                    If bestID = "" Then
+                        catalogID = "": note = "No recipe in range"
+                    Else
+                        catalogID = LookupCatalog(wsCatalog, bestGenus, bestSeries, varCode)
+                        note = IIf(catalogID = "", "No Catalog", "OK")
+                    End If
+                    
+                    With wsOut
+                        .Cells(outRow, "A").Value = idCtr
+                        .Cells(outRow, "B").Value = bestID
+                        .Cells(outRow, "C").Value = catalogID
+                        .Cells(outRow, "D").Value = currentPct * 100
+                        .Cells(outRow, "E").Value = commonItem
+                        .Cells(outRow, "F").Value = loc         '<< Location
+                        .Cells(outRow, "G").Value = note
+                        .Cells(outRow, "H").Value = varCode
+                    End With
+                    
+                    outRow = outRow + 1: idCtr = idCtr + 1
+                End If
+                
+                currentPct = pct
+                startCol = c
+            End If
+        Next c
+    Next r
+    
+    wsOut.Columns.AutoFit
+    MsgBox "Mix breakout generation complete.", vbInformation
+End Sub
+
+
+'============================= helpers ===============================
+
+Public Function PickBestRecipe(ws As Worksheet, loc$, prod$, firstWk&, _
+                               genusOut, seriesOut) As Variant
+    Dim bestScore As Long: bestScore = 9999
+    Dim bestID As Variant: bestID = ""
+    
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastRow
+        If Trim$(ws.Cells(r, 2).Value) = loc And Trim$(ws.Cells(r, 7).Value) = prod Then
+            Dim sw, ew: sw = ws.Cells(r, 3).Value: ew = ws.Cells(r, 4).Value
+            If (sw = "" Or firstWk >= sw) And (ew = "" Or firstWk <= ew) Then
+                Dim lb As Long: lb = IIf(IsNumeric(sw) And sw <> "", CLng(sw), 1)
+                Dim ub As Long: ub = IIf(IsNumeric(ew) And ew <> "", CLng(ew), 53)
+                Dim score As Long: score = ub - lb
+                If score < bestScore Then
+                    bestScore = score: bestID = ws.Cells(r, 1).Value
+                    genusOut = ws.Cells(r, 6).Value: seriesOut = ws.Cells(r, 7).Value
+                End If
+            End If
+        End If
+    Next r
+    PickBestRecipe = bestID
+End Function
+
+Public Function LookupCatalog(ws As Worksheet, genus, series, varCode) As Variant
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastRow
+        If ws.Cells(r, 2).Value = genus And ws.Cells(r, 3).Value = series _
+           And ws.Cells(r, 4).Value = varCode Then
+            LookupCatalog = ws.Cells(r, 1).Value: Exit Function
+        End If
+    Next r
+    LookupCatalog = ""
+End Function
+
+Public Function GetRecipeBoundaries(ws As Worksheet, loc$, prod$) As Object
+    Dim d As Object: Set d = CreateObject("Scripting.Dictionary")
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim r As Long
+    For r = 2 To lastRow
+        If Trim$(ws.Cells(r, 2).Value) = loc And Trim$(ws.Cells(r, 7).Value) = prod Then
+            Dim sw: sw = ws.Cells(r, 3).Value
+            If IsNumeric(sw) And sw > 1 Then d(CLng(sw)) = True
+        End If
+    Next r
+    Set GetRecipeBoundaries = d
+End Function
+
+

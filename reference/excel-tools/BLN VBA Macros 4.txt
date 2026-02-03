@@ -1,0 +1,75 @@
+Sub CreateWildcardRecipes()
+    Dim ws As Worksheet
+    Set ws = ThisWorkbook.Sheets("Consolidated 4M-Variant") ' Your pivoted input sheet
+
+    Dim outputWs As Worksheet
+    Set outputWs = ThisWorkbook.Sheets.Add(After:=ws)
+    outputWs.Name = "Wildcard Recipes"
+
+    Dim lastRow As Long, lastCol As Long
+    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
+    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
+
+    Dim r As Long, c As Long, i As Long
+    Dim startWeek As Long
+    Dim weekPattern As String, lastPattern As String
+    Dim outRow As Long: outRow = 2
+
+    ' Output headers
+    With outputWs
+        .Cells(1, 1).Value = "Location"
+        .Cells(1, 2).Value = "Common Item"
+        .Cells(1, 3).Value = "Production Item"
+        .Cells(1, 4).Value = "Start Week"
+        .Cells(1, 5).Value = "End Week"
+        .Cells(1, 6).Value = "Wildcard Pattern"
+    End With
+
+    r = 2
+    Do While r <= lastRow
+        startWeek = 1
+        lastPattern = ""
+
+        For c = 8 To lastCol ' Week columns start at column 8
+            weekPattern = ""
+            ' Build pattern for all variant rows in this block (until Common Item changes)
+            i = r
+            Do While i <= lastRow And ws.Cells(i, 2).Value = ws.Cells(r, 2).Value _
+                                  And ws.Cells(i, 4).Value = ws.Cells(r, 4).Value
+                weekPattern = weekPattern & "|" & Trim(ws.Cells(i, c).Text)
+                i = i + 1
+            Loop
+            weekPattern = Mid(weekPattern, 2) ' remove leading pipe
+
+            If weekPattern <> lastPattern And lastPattern <> "" Then
+                ' Output previous block
+                outputWs.Cells(outRow, 1).Value = ws.Cells(r, 1).Value
+                outputWs.Cells(outRow, 2).Value = ws.Cells(r, 2).Value
+                outputWs.Cells(outRow, 3).Value = ws.Cells(r, 4).Value
+                outputWs.Cells(outRow, 4).Value = startWeek
+                outputWs.Cells(outRow, 5).Value = c - 8
+                outputWs.Cells(outRow, 6).Value = lastPattern
+                outRow = outRow + 1
+                startWeek = c - 7
+            End If
+
+            lastPattern = weekPattern
+        Next c
+
+        ' Output final block
+        outputWs.Cells(outRow, 1).Value = ws.Cells(r, 1).Value
+        outputWs.Cells(outRow, 2).Value = ws.Cells(r, 2).Value
+        outputWs.Cells(outRow, 3).Value = ws.Cells(r, 4).Value
+        outputWs.Cells(outRow, 4).Value = startWeek
+        outputWs.Cells(outRow, 5).Value = lastCol - 7
+        outputWs.Cells(outRow, 6).Value = lastPattern
+        outRow = outRow + 1
+
+        ' Move to next recipe block
+        r = i
+    Loop
+
+    MsgBox "Wildcard recipes created on sheet: 'Wildcard Recipes'"
+End Sub
+
+

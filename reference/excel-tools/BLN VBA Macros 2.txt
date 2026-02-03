@@ -1,0 +1,174 @@
+Option Explicit
+'=====================================================================
+'  GenerateSpaceEvents  |  creates / refreshes the “SpaceEvents” sheet
+'=====================================================================
+Public Sub GenerateSpaceEvents()
+
+    Dim wsRecipes As Worksheet, wsSchemes As Worksheet, wsOut As Worksheet
+    Set wsRecipes = ThisWorkbook.Sheets("Recipe Rules")
+    Set wsSchemes = ThisWorkbook.Sheets("Schemes")
+    
+    '---------------------------------------------------------------
+    '  (re)create output sheet
+    '---------------------------------------------------------------
+    On Error Resume Next
+    Set wsOut = ThisWorkbook.Sheets("SpaceEvents")
+    If wsOut Is Nothing Then Set wsOut = ThisWorkbook.Sheets.Add
+    wsOut.Name = "SpaceEvents"
+    On Error GoTo 0
+    
+    wsOut.Cells.Clear
+    wsOut.Range("A1:L1").Value = Array("Recipe ID", "Location", "Category", "Scheme Code", _
+                                       "Genus", "Series", "Color", "Phase", _
+                                       "Start Week", "End Week", "Trigger (wks)", "Duration (wks)")
+    
+    '---------------------------------------------------------------
+    ' 1. cache Schemes   (phase rules per Scheme Code)
+    '---------------------------------------------------------------
+    Dim schemeDict As Object: Set schemeDict = BuildSchemeDictionary(wsSchemes)
+    
+    '---------------------------------------------------------------
+    ' 2. cache Recipe Rules per SchemeCode
+    '---------------------------------------------------------------
+    Dim recipeDict As Object: Set recipeDict = CreateObject("Scripting.Dictionary")
+    
+    Const COL_ID         As Long = 1
+    Const COL_LOCATION   As Long = 3
+    Const COL_CATEGORY   As Long = 4
+    Const COL_GENUS      As Long = 5
+    Const COL_SERIES     As Long = 6
+    Const COL_COLOR      As Long = 7
+    Const COL_START      As Long = 8
+    Const COL_END        As Long = 9
+    Const COL_GROWWKS    As Long = 10
+    Const COL_SCHEMECODE As Long = 15        ' “Notes” column
+    
+    Dim lastRecRow As Long
+    lastRecRow = wsRecipes.Cells(wsRecipes.rows.Count, "A").End(xlUp).Row
+    
+    Dim r As Long, sc As Variant
+    For r = 2 To lastRecRow         ' skip header row
+    
+        sc = Trim$(wsRecipes.Cells(r, COL_SCHEMECODE).Value)
+        If Len(sc) = 0 Then GoTo NextRecRow
+        
+        Dim recArr(1 To 9) As Variant
+        recArr(1) = wsRecipes.Cells(r, COL_ID).Value
+        recArr(2) = wsRecipes.Cells(r, COL_LOCATION).Value
+        recArr(3) = wsRecipes.Cells(r, COL_CATEGORY).Value
+        recArr(4) = wsRecipes.Cells(r, COL_GENUS).Value
+        recArr(5) = wsRecipes.Cells(r, COL_SERIES).Value
+        recArr(6) = wsRecipes.Cells(r, COL_COLOR).Value
+        recArr(7) = CLng(wsRecipes.Cells(r, COL_START).Value)
+        recArr(8) = CLng(wsRecipes.Cells(r, COL_END).Value)
+        recArr(9) = CLng(wsRecipes.Cells(r, COL_GROWWKS).Value)
+        
+        If Not recipeDict.Exists(sc) Then recipeDict.Add sc, New Collection
+        recipeDict(sc).Add recArr
+        
+NextRecRow:
+    Next r
+    
+    '---------------------------------------------------------------
+    ' 3. build SpaceEvents rows
+    '---------------------------------------------------------------
+    Dim rowsOut As New Collection
+    Dim rule As Variant, extraPhase As String
+    Dim extraStart As Long, extraEnd As Long, extraDur As Long
+    Dim rec As Variant, ovStart As Long, ovEnd As Long, triggerWks As Long
+    Dim i As Long, ruleG As Variant
+    
+    For Each sc In schemeDict.Keys
+        
+        If Not recipeDict.Exists(sc) Then GoTo NextScheme
+        
+        Dim colRules As Collection: Set colRules = schemeDict(sc)
+        
+        For Each rule In colRules          ' includes GROW rules
+            
+            extraPhase = rule(4)           ' “GROW”, “SPACE”, “HANG”, …
+            extraStart = CLng(rule(1))
+            extraEnd = CLng(rule(2))
+            extraDur = CLng(rule(3))
+            
+            For Each rec In recipeDict(sc)
+                
+                ' no overlap between recipe’s grow window and the rule window
+                If rec(7) > extraEnd Or rec(8) < extraStart Then GoTo NextRec
+                
+                ' slice the overlap
+                ovStart = WorksheetFunction.Max(rec(7), extraStart)
+                ovEnd = WorksheetFunction.Min(rec(8), extraEnd)
+                
+                ' determine trigger weeks
+                If extraPhase = "GROW" Then
+                    triggerWks = 0                     ' grow starts itself
+                Else
+                    triggerWks = 0
+                    For Each ruleG In colRules
+                        If ruleG(4) = "GROW" Then
+                            If ovStart >= ruleG(1) And ovEnd <= ruleG(2) Then
+                                triggerWks = ruleG(3): Exit For
+                            End If
+                        End If
+                    Next ruleG
+                End If
+                
+                rowsOut.Add Array( _
+                    rec(1), rec(2), rec(3), sc, rec(4), rec(5), rec(6), _
+                    extraPhase, ovStart, ovEnd, triggerWks, extraDur)
+NextRec:
+            Next rec
+        Next rule
+NextScheme:
+    Next sc
+    
+    '---------------------------------------------------------------
+    ' 4. dump to sheet
+    '---------------------------------------------------------------
+    If rowsOut.Count > 0 Then
+        Dim outArr() As Variant: ReDim outArr(1 To rowsOut.Count, 1 To 12)
+        For i = 1 To rowsOut.Count
+            Dim j As Long
+            For j = 1 To 12
+                outArr(i, j) = rowsOut(i)(j - 1)
+            Next j
+        Next i
+        wsOut.Range("A2").Resize(rowsOut.Count, 12).Value = outArr
+    End If
+    
+    MsgBox "Space events generated: " & rowsOut.Count, vbInformation
+End Sub
+
+'=====================================================================
+'  BuildSchemeDictionary  – returns Dictionary(SchemeCode ? Collection of rules)
+'       Each rule = Array(StartWeek, EndWeek, GrowWeeks, Phase)
+'=====================================================================
+Public Function BuildSchemeDictionary(ws As Worksheet) As Object
+    
+    Dim dict As Object: Set dict = CreateObject("Scripting.Dictionary")
+    
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.rows.Count, "A").End(xlUp).Row
+    
+    Dim i As Long, code As String
+    Dim arr(1 To 4) As Variant
+    
+    For i = 2 To lastRow          ' assume headers in row 1
+        code = Trim$(ws.Cells(i, 1).Value)
+        If Len(code) = 0 Then GoTo NextRow
+        
+        arr(1) = ws.Cells(i, 5).Value                 ' Start Week
+        arr(2) = ws.Cells(i, 6).Value                 ' End Week
+        arr(3) = ws.Cells(i, 7).Value                 ' Grow Weeks (trigger)
+        arr(4) = UCase$(Trim$(ws.Cells(i, 3).Value))  ' Phase
+        
+        If Not dict.Exists(code) Then dict.Add code, New Collection
+        dict(code).Add arr
+NextRow:
+    Next i
+    
+    Set BuildSchemeDictionary = dict
+End Function
+
+
