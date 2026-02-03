@@ -5,7 +5,10 @@ import SyncIcon from '@mui/icons-material/Sync';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import DownloadIcon from '@mui/icons-material/Download';
+import WarningIcon from '@mui/icons-material/Warning';
 import { PRODUCE_COLORS } from '../theme/produceTheme';
+import { parseAllFiles, transform, downloadAllExports } from '../transform';
+import type { TransformResult as FullTransformResult } from '../transform';
 
 interface StatusCardProps {
   title: string;
@@ -22,12 +25,13 @@ interface UploadedFile {
   rowCount?: number;
 }
 
-interface TransformResult {
+interface TransformSummary {
   catalogs: number;
   recipes: number;
   events: number;
   specs: number;
   errors: string[];
+  warnings: string[];
 }
 
 const ARC_FLOW_FILES = [
@@ -73,14 +77,16 @@ function detectFileType(fileName: string): 'arc-flow' | 'excel' | 'unknown' {
 
 function countCsvRows(content: string): number {
   const lines = content.split('\n').filter(line => line.trim().length > 0);
-  return Math.max(0, lines.length - 1); // Subtract header row
+  return Math.max(0, lines.length - 1);
 }
 
 export default function Dashboard() {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isTransforming, setIsTransforming] = useState(false);
   const [transformProgress, setTransformProgress] = useState(0);
-  const [transformResult, setTransformResult] = useState<TransformResult | null>(null);
+  const [transformStep, setTransformStep] = useState('');
+  const [transformSummary, setTransformSummary] = useState<TransformSummary | null>(null);
+  const [fullResult, setFullResult] = useState<FullTransformResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,7 +102,6 @@ export default function Dashboard() {
         type: detectFileType(file.name),
       };
 
-      // Read CSV content
       if (file.name.endsWith('.csv')) {
         const content = await file.text();
         fileData.content = content;
@@ -107,7 +112,8 @@ export default function Dashboard() {
     }
 
     setUploadedFiles(prev => [...prev, ...newFiles]);
-    setTransformResult(null); // Reset transform when new files added
+    setTransformSummary(null);
+    setFullResult(null);
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -121,66 +127,76 @@ export default function Dashboard() {
   const handleTransform = async () => {
     setIsTransforming(true);
     setTransformProgress(0);
-    setTransformResult(null);
+    setTransformSummary(null);
+    setFullResult(null);
 
-    // Simulate transformation steps
     const steps = [
-      'Parsing ProductionScheme...',
-      'Parsing ProductionSchemeLine...',
-      'Parsing ProductionSchemeLinePeriod...',
-      'Parsing ProductionPreferences...',
-      'Building scheme dictionary...',
-      'Generating catalogs...',
-      'Generating recipes...',
-      'Generating events...',
-      'Generating space specs...',
-      'Validating output...',
+      { label: 'Parsing CSV files...', progress: 10 },
+      { label: 'Building scheme dictionary...', progress: 30 },
+      { label: 'Generating catalogs...', progress: 50 },
+      { label: 'Generating recipes...', progress: 70 },
+      { label: 'Generating events & specs...', progress: 90 },
+      { label: 'Validating output...', progress: 100 },
     ];
 
-    for (let i = 0; i < steps.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 300));
-      setTransformProgress(((i + 1) / steps.length) * 100);
+    try {
+      // Step 1: Parse files
+      setTransformStep(steps[0].label);
+      setTransformProgress(steps[0].progress);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      const csvFiles = uploadedFiles
+        .filter(f => f.content)
+        .map(f => ({ name: f.name, content: f.content! }));
+
+      const parsedData = parseAllFiles(csvFiles);
+
+      // Step 2-5: Transform
+      for (let i = 1; i < steps.length - 1; i++) {
+        setTransformStep(steps[i].label);
+        setTransformProgress(steps[i].progress);
+        await new Promise(resolve => setTimeout(resolve, 150));
+      }
+
+      const result = transform(parsedData);
+
+      // Step 6: Complete
+      setTransformStep(steps[steps.length - 1].label);
+      setTransformProgress(100);
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      setFullResult(result);
+      setTransformSummary({
+        catalogs: result.catalogs.length,
+        recipes: result.recipes.length,
+        events: result.events.length,
+        specs: result.specs.length,
+        errors: result.errors,
+        warnings: result.warnings,
+      });
+    } catch (error) {
+      setTransformSummary({
+        catalogs: 0,
+        recipes: 0,
+        events: 0,
+        specs: 0,
+        errors: [error instanceof Error ? error.message : 'Unknown error occurred'],
+        warnings: [],
+      });
     }
-
-    // Calculate actual row counts from uploaded files
-    const schemeFile = uploadedFiles.find(f => f.name.toLowerCase().includes('productionscheme') && !f.name.toLowerCase().includes('line'));
-    const lineFile = uploadedFiles.find(f => f.name.toLowerCase().includes('productionschemeline') && !f.name.toLowerCase().includes('period'));
-
-    const schemeRows = schemeFile?.rowCount || 0;
-    const lineRows = lineFile?.rowCount || 0;
-
-    setTransformResult({
-      catalogs: Math.floor(lineRows * 0.8), // Estimate unique catalogs
-      recipes: schemeRows,
-      events: Math.floor(schemeRows * 2), // ~2 events per recipe (grow + space)
-      specs: Math.floor(schemeRows * 1.5), // ~1.5 specs per recipe
-      errors: [],
-    });
 
     setIsTransforming(false);
   };
 
   const handleExport = () => {
-    if (!transformResult) return;
-
-    // Create a simple summary export
-    const exportData = {
-      timestamp: new Date().toISOString(),
-      summary: transformResult,
-      files: uploadedFiles.map(f => ({ name: f.name, rows: f.rowCount })),
-    };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bln-transform-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+    if (!fullResult) return;
+    downloadAllExports(fullResult, 'bln');
   };
 
   const arcFlowCount = uploadedFiles.filter(f => f.type === 'arc-flow').length;
   const totalRows = uploadedFiles.reduce((sum, f) => sum + (f.rowCount || 0), 0);
+  const hasErrors = transformSummary && transformSummary.errors.length > 0;
+  const hasWarnings = transformSummary && transformSummary.warnings.length > 0;
 
   return (
     <Box>
@@ -192,8 +208,8 @@ export default function Dashboard() {
       <Stack direction={{ xs: 'column', sm: 'row' }} spacing={3} sx={{ mb: 4 }} flexWrap="wrap">
         <StatusCard
           title="Last Sync"
-          value={transformResult ? 'Just now' : 'Never'}
-          subtitle={transformResult ? new Date().toLocaleTimeString() : 'No syncs yet'}
+          value={transformSummary ? 'Just now' : 'Never'}
+          subtitle={transformSummary ? new Date().toLocaleTimeString() : 'No syncs yet'}
         />
         <StatusCard
           title="Files Uploaded"
@@ -202,13 +218,23 @@ export default function Dashboard() {
         />
         <StatusCard
           title="Recipes"
-          value={transformResult?.recipes || 0}
+          value={transformSummary?.recipes || 0}
           subtitle="Generated"
         />
         <StatusCard
           title="Status"
-          value={isTransforming ? 'Running' : transformResult ? 'Complete' : uploadedFiles.length > 0 ? 'Ready' : 'Waiting'}
-          color={transformResult ? '#2e7d32' : isTransforming ? PRODUCE_COLORS.primary : PRODUCE_COLORS.darkGray}
+          value={
+            isTransforming ? 'Running' :
+            hasErrors ? 'Errors' :
+            transformSummary ? 'Complete' :
+            uploadedFiles.length > 0 ? 'Ready' : 'Waiting'
+          }
+          color={
+            hasErrors ? '#d32f2f' :
+            transformSummary ? '#2e7d32' :
+            isTransforming ? PRODUCE_COLORS.primary :
+            PRODUCE_COLORS.darkGray
+          }
         />
       </Stack>
 
@@ -221,40 +247,73 @@ export default function Dashboard() {
             </Typography>
             <LinearProgress variant="determinate" value={transformProgress} sx={{ mb: 1 }} />
             <Typography variant="body2" color="text.secondary">
-              {Math.round(transformProgress)}% complete
+              {transformStep} ({Math.round(transformProgress)}%)
             </Typography>
           </CardContent>
         </Card>
       )}
 
       {/* Transform Results */}
-      {transformResult && (
+      {transformSummary && !isTransforming && (
         <Card sx={{ mb: 3 }}>
           <CardContent>
-            <Typography variant="h6" gutterBottom sx={{ color: '#2e7d32' }}>
-              Transform Complete
+            <Typography
+              variant="h6"
+              gutterBottom
+              sx={{ color: hasErrors ? '#d32f2f' : '#2e7d32' }}
+            >
+              {hasErrors ? 'Transform Failed' : 'Transform Complete'}
             </Typography>
-            <Stack direction="row" spacing={4} flexWrap="wrap">
-              <Box>
-                <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>{transformResult.catalogs}</Typography>
-                <Typography variant="body2" color="text.secondary">Catalogs</Typography>
-              </Box>
-              <Box>
-                <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>{transformResult.recipes}</Typography>
-                <Typography variant="body2" color="text.secondary">Recipes</Typography>
-              </Box>
-              <Box>
-                <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>{transformResult.events}</Typography>
-                <Typography variant="body2" color="text.secondary">Events</Typography>
-              </Box>
-              <Box>
-                <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>{transformResult.specs}</Typography>
-                <Typography variant="body2" color="text.secondary">Space Specs</Typography>
-              </Box>
-            </Stack>
-            {transformResult.errors.length > 0 && (
-              <Alert severity="warning" sx={{ mt: 2 }}>
-                {transformResult.errors.length} validation warnings
+
+            {!hasErrors && (
+              <Stack direction="row" spacing={4} flexWrap="wrap" sx={{ mb: 2 }}>
+                <Box>
+                  <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>
+                    {transformSummary.catalogs.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">Catalogs</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>
+                    {transformSummary.recipes.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">Recipes</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>
+                    {transformSummary.events.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">Events</Typography>
+                </Box>
+                <Box>
+                  <Typography variant="h5" sx={{ color: PRODUCE_COLORS.primary }}>
+                    {transformSummary.specs.toLocaleString()}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">Space Specs</Typography>
+                </Box>
+              </Stack>
+            )}
+
+            {hasErrors && (
+              <Alert severity="error" sx={{ mt: 2 }}>
+                <Typography variant="subtitle2">Errors:</Typography>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {transformSummary.errors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </Alert>
+            )}
+
+            {hasWarnings && (
+              <Alert severity="warning" sx={{ mt: 2 }} icon={<WarningIcon />}>
+                <Typography variant="subtitle2">
+                  {transformSummary.warnings.length} warnings
+                </Typography>
+                <Typography variant="body2">
+                  {transformSummary.warnings.slice(0, 5).join(', ')}
+                  {transformSummary.warnings.length > 5 && ` and ${transformSummary.warnings.length - 5} more...`}
+                </Typography>
               </Alert>
             )}
           </CardContent>
@@ -278,7 +337,8 @@ export default function Dashboard() {
                   variant="outlined"
                   onDelete={() => {
                     setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-                    setTransformResult(null);
+                    setTransformSummary(null);
+                    setFullResult(null);
                   }}
                   sx={{ mb: 1 }}
                 />
@@ -289,7 +349,7 @@ export default function Dashboard() {
                 Missing Arc Flow files: {4 - arcFlowCount} of 4. Expected: ProductionPreferences, ProductionScheme, ProductionSchemeLine, ProductionSchemeLinePeriod
               </Alert>
             )}
-            {arcFlowCount >= 4 && !transformResult && (
+            {arcFlowCount >= 4 && !transformSummary && (
               <Alert severity="success" sx={{ mt: 2 }}>
                 All 4 Arc Flow files uploaded. Ready to transform.
               </Alert>
@@ -337,36 +397,42 @@ export default function Dashboard() {
               Transform Data
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Run transformation logic and validate changes
+              Run VBA transformation logic (converted to TypeScript)
             </Typography>
             <Button
-              variant={transformResult ? 'outlined' : 'contained'}
+              variant={transformSummary && !hasErrors ? 'outlined' : 'contained'}
               startIcon={isTransforming ? <CircularProgress size={20} color="inherit" /> : <SyncIcon />}
               onClick={handleTransform}
               disabled={arcFlowCount < 4 || isTransforming}
             >
-              {isTransforming ? 'Transforming...' : transformResult ? 'Re-run Transform' : 'Run Transform'}
+              {isTransforming ? 'Transforming...' : transformSummary ? 'Re-run Transform' : 'Run Transform'}
             </Button>
           </CardContent>
         </Card>
 
         <Card sx={{ flex: 1 }}>
           <CardContent sx={{ textAlign: 'center', py: 4 }}>
-            <CheckCircleIcon sx={{ fontSize: 48, color: transformResult ? '#2e7d32' : PRODUCE_COLORS.primary, mb: 2 }} />
+            <CheckCircleIcon
+              sx={{
+                fontSize: 48,
+                color: transformSummary && !hasErrors ? '#2e7d32' : PRODUCE_COLORS.primary,
+                mb: 2
+              }}
+            />
             <Typography variant="h6" gutterBottom>
               Generate Import
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-              Export PRODUCE-ready import files
+              Export PRODUCE-ready CSV files (5 files)
             </Typography>
             <Button
               variant="contained"
-              color={transformResult ? 'success' : 'primary'}
+              color={transformSummary && !hasErrors ? 'success' : 'primary'}
               startIcon={<DownloadIcon />}
               onClick={handleExport}
-              disabled={!transformResult}
+              disabled={!fullResult || !!hasErrors}
             >
-              Export
+              Download All
             </Button>
           </CardContent>
         </Card>
@@ -382,10 +448,10 @@ export default function Dashboard() {
             <strong>Source:</strong> Agroware → Arc Flow (4 CSV tables) + Manual Excel
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            <strong>Transform:</strong> VBA logic converted to TypeScript
+            <strong>Transform:</strong> BuildSchemeDictionary → MergeGrowAndSpace → GenerateRecipes → GenerateEvents
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            <strong>Target:</strong> PRODUCE-ready imports (Catalogs, Recipes, Events, Specs)
+            <strong>Output:</strong> Catalogs, Recipes, Events, SpaceSpecs (PRODUCE-ready CSVs)
           </Typography>
         </CardContent>
       </Card>
