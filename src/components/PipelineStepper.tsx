@@ -12,12 +12,14 @@ import {
   LinearProgress,
   Alert,
   CircularProgress,
+  Divider,
 } from '@mui/material';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import FactCheckIcon from '@mui/icons-material/FactCheck';
 import SyncIcon from '@mui/icons-material/Sync';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import ErrorOutlineIcon from '@mui/icons-material/ErrorOutline';
@@ -221,8 +223,8 @@ export default function PipelineStepper({ pipeline }: PipelineStepperProps) {
                 icon={
                   <Box
                     sx={{
-                      width: 40,
-                      height: 40,
+                      width: 52,
+                      height: 52,
                       borderRadius: '50%',
                       display: 'flex',
                       alignItems: 'center',
@@ -231,6 +233,13 @@ export default function PipelineStepper({ pipeline }: PipelineStepperProps) {
                       color: completed || active ? '#fff' : '#999',
                       cursor: completed ? 'pointer' : 'default',
                       transition: 'all 0.3s ease',
+                      border: active ? `3px solid ${PRODUCE_COLORS.primaryDark}` : completed ? '3px solid #1b5e20' : '3px solid transparent',
+                      boxShadow: active ? '0 2px 8px rgba(219,110,20,0.4)' : 'none',
+                      '&:hover': completed ? {
+                        transform: 'scale(1.1)',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+                      } : {},
+                      '& .MuiSvgIcon-root': { fontSize: '1.5rem' },
                     }}
                     onClick={() => {
                       if (completed) pipeline.setActiveStep(idx);
@@ -242,6 +251,7 @@ export default function PipelineStepper({ pipeline }: PipelineStepperProps) {
                 sx={{
                   '& .MuiStepLabel-label': {
                     fontWeight: active ? 700 : 500,
+                    fontSize: active ? '0.95rem' : '0.875rem',
                     color: active ? PRODUCE_COLORS.primary : completed ? '#2e7d32' : 'text.secondary',
                     mt: 1,
                   },
@@ -292,6 +302,86 @@ export default function PipelineStepper({ pipeline }: PipelineStepperProps) {
           </Box>
         )}
       </Box>
+
+      {/* Navigation Bar */}
+      <Divider sx={{ my: 3 }} />
+      <Stack
+        direction="row"
+        justifyContent="space-between"
+        alignItems="center"
+        sx={{
+          p: 2,
+          borderRadius: 2,
+          backgroundColor: '#f8f9fa',
+        }}
+      >
+        <Box>
+          {activeStep > 0 && !pipeline.isTransforming && (
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<ArrowBackIcon />}
+              onClick={() => pipeline.setActiveStep(activeStep - 1)}
+              sx={{ minWidth: 160, fontWeight: 600 }}
+            >
+              {activeStep === 1 ? 'Back to Upload' : activeStep === 2 ? 'Back to Validate' : 'Back to Transform'}
+            </Button>
+          )}
+        </Box>
+
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+          Step {activeStep + 1} of {STEP_LABELS.length}: <strong>{STEP_LABELS[activeStep]}</strong>
+        </Typography>
+
+        <Box>
+          {activeStep === 0 && (
+            <Button
+              variant="contained"
+              size="large"
+              endIcon={<ArrowForwardIcon />}
+              onClick={handleProceedToValidate}
+              disabled={!pipeline.canProceedToValidate}
+              sx={{ minWidth: 200, fontWeight: 600, py: 1.2 }}
+            >
+              Validate Data
+            </Button>
+          )}
+          {activeStep === 1 && (
+            <Button
+              variant="contained"
+              size="large"
+              endIcon={<ArrowForwardIcon />}
+              onClick={handleRunTransform}
+              disabled={!pipeline.canTransform}
+              sx={{ minWidth: 200, fontWeight: 600, py: 1.2 }}
+            >
+              Run Transform
+            </Button>
+          )}
+          {activeStep === 2 && !pipeline.isTransforming && pipeline.hasResults && (
+            <Button
+              variant="contained"
+              size="large"
+              endIcon={<ArrowForwardIcon />}
+              onClick={() => pipeline.setActiveStep(3)}
+              sx={{ minWidth: 200, fontWeight: 600, py: 1.2 }}
+            >
+              View Results
+            </Button>
+          )}
+          {activeStep === 3 && (
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<RestartAltIcon />}
+              onClick={pipeline.reset}
+              sx={{ minWidth: 160, fontWeight: 600 }}
+            >
+              Start Over
+            </Button>
+          )}
+        </Box>
+      </Stack>
 
       {/* Pipeline Info Footer */}
       {activeStep === 0 && (
