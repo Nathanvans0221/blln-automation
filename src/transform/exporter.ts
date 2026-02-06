@@ -1,3 +1,4 @@
+import * as XLSX from 'xlsx';
 import type { TransformResult, Catalog, Recipe, SpaceEvent, SpaceSpec, RecipeMix } from './types';
 
 /**
@@ -145,36 +146,90 @@ export function downloadFile(content: string, filename: string, mimeType = 'text
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Delay revocation so the browser has time to start the download
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 /**
- * Download all exports as separate files
+ * Trigger browser download of a Blob/ArrayBuffer
+ */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/**
+ * Export all results as a single multi-sheet Excel workbook.
+ * One download — no browser popup-blocker issues.
+ */
+export function downloadAsExcel(result: TransformResult, prefix = 'bln'): void {
+  const wb = XLSX.utils.book_new();
+
+  if (result.catalogs.length > 0) {
+    const ws = XLSX.utils.json_to_sheet(result.catalogs);
+    XLSX.utils.book_append_sheet(wb, ws, 'Catalogs');
+  }
+  if (result.recipes.length > 0) {
+    const ws = XLSX.utils.json_to_sheet(result.recipes);
+    XLSX.utils.book_append_sheet(wb, ws, 'Recipes');
+  }
+  if (result.events.length > 0) {
+    const ws = XLSX.utils.json_to_sheet(result.events);
+    XLSX.utils.book_append_sheet(wb, ws, 'Events');
+  }
+  if (result.specs.length > 0) {
+    const ws = XLSX.utils.json_to_sheet(result.specs);
+    XLSX.utils.book_append_sheet(wb, ws, 'SpaceSpecs');
+  }
+  if (result.mixes.length > 0) {
+    const ws = XLSX.utils.json_to_sheet(result.mixes);
+    XLSX.utils.book_append_sheet(wb, ws, 'Mixes');
+  }
+
+  // Summary sheet
+  const summaryData = [
+    { field: 'Timestamp', value: new Date().toISOString() },
+    { field: 'Catalogs', value: result.catalogs.length },
+    { field: 'Recipes', value: result.recipes.length },
+    { field: 'Events', value: result.events.length },
+    { field: 'SpaceSpecs', value: result.specs.length },
+    { field: 'Mixes', value: result.mixes.length },
+    { field: 'Errors', value: result.errors.length },
+    { field: 'Warnings', value: result.warnings.length },
+  ];
+  const summaryWs = XLSX.utils.json_to_sheet(summaryData);
+  XLSX.utils.book_append_sheet(wb, summaryWs, 'Summary');
+
+  const timestamp = new Date().toISOString().split('T')[0];
+  XLSX.writeFile(wb, `${prefix}-export-${timestamp}.xlsx`);
+}
+
+/**
+ * Download all exports as separate CSV files (with sufficient delays)
  */
 export function downloadAllExports(result: TransformResult, prefix = 'bln'): void {
   const timestamp = new Date().toISOString().split('T')[0];
-  const exports = exportAll(result);
+  const allExports = exportAll(result);
 
-  downloadFile(exports.catalogs, `${prefix}-catalogs-${timestamp}.csv`);
+  const files: { content: string; name: string; mime?: string }[] = [
+    { content: allExports.catalogs, name: `${prefix}-catalogs-${timestamp}.csv` },
+    { content: allExports.recipes, name: `${prefix}-recipes-${timestamp}.csv` },
+    { content: allExports.events, name: `${prefix}-events-${timestamp}.csv` },
+    { content: allExports.specs, name: `${prefix}-specs-${timestamp}.csv` },
+    { content: allExports.mixes, name: `${prefix}-mixes-${timestamp}.csv` },
+    { content: allExports.summary, name: `${prefix}-summary-${timestamp}.json`, mime: 'application/json' },
+  ].filter(f => f.content.length > 0);
 
-  // Small delay between downloads to prevent browser issues
-  setTimeout(() => {
-    downloadFile(exports.recipes, `${prefix}-recipes-${timestamp}.csv`);
-  }, 100);
-
-  setTimeout(() => {
-    downloadFile(exports.events, `${prefix}-events-${timestamp}.csv`);
-  }, 200);
-
-  setTimeout(() => {
-    downloadFile(exports.specs, `${prefix}-specs-${timestamp}.csv`);
-  }, 300);
-
-  setTimeout(() => {
-    downloadFile(exports.mixes, `${prefix}-mixes-${timestamp}.csv`);
-  }, 400);
-
-  setTimeout(() => {
-    downloadFile(exports.summary, `${prefix}-summary-${timestamp}.json`, 'application/json');
-  }, 500);
+  // Chain downloads with 800ms gaps to avoid browser blocking
+  files.forEach((file, i) => {
+    setTimeout(() => {
+      downloadFile(file.content, file.name, file.mime || 'text/csv');
+    }, i * 800);
+  });
 }

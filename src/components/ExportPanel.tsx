@@ -6,14 +6,12 @@ import {
   Typography,
   Stack,
   Button,
-  Checkbox,
-  FormControlLabel,
   Divider,
   Chip,
   Alert,
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
-import FolderZipIcon from '@mui/icons-material/FolderZip';
+import TableViewIcon from '@mui/icons-material/TableView';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import type { TransformResult } from '../transform/types';
 import {
@@ -23,7 +21,7 @@ import {
   exportSpecsCSV,
   exportMixesCSV,
   downloadFile,
-  exportAll,
+  downloadAsExcel,
 } from '../transform/exporter';
 
 interface ExportPanelProps {
@@ -38,7 +36,8 @@ interface ExportItem {
 }
 
 export default function ExportPanel({ result }: ExportPanelProps) {
-  const [downloaded, setDownloaded] = useState<Set<string>>(new Set());
+  const [excelDownloaded, setExcelDownloaded] = useState(false);
+  const [csvDownloaded, setCsvDownloaded] = useState<Set<string>>(new Set());
 
   const exports: ExportItem[] = [
     { key: 'catalogs', label: 'Catalogs', count: result.catalogs.length, getCSV: () => exportCatalogsCSV(result.catalogs) },
@@ -48,147 +47,98 @@ export default function ExportPanel({ result }: ExportPanelProps) {
     { key: 'mixes', label: 'Mixes', count: result.mixes.length, getCSV: () => exportMixesCSV(result.mixes) },
   ];
 
-  const [selected, setSelected] = useState<Set<string>>(new Set(exports.map(e => e.key)));
+  const totalRows = exports.reduce((sum, e) => sum + e.count, 0);
 
-  const handleToggle = (key: string) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
-      return next;
-    });
+  const handleDownloadExcel = () => {
+    downloadAsExcel(result);
+    setExcelDownloaded(true);
   };
 
-  const handleToggleAll = () => {
-    if (selected.size === exports.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(exports.map(e => e.key)));
-    }
-  };
-
-  const handleDownloadSingle = (item: ExportItem) => {
+  const handleDownloadSingleCSV = (item: ExportItem) => {
     const timestamp = new Date().toISOString().split('T')[0];
     const csv = item.getCSV();
     downloadFile(csv, `bln-${item.key}-${timestamp}.csv`);
-    setDownloaded(prev => new Set([...prev, item.key]));
+    setCsvDownloaded(prev => new Set([...prev, item.key]));
   };
-
-  const handleDownloadAll = () => {
-    const timestamp = new Date().toISOString().split('T')[0];
-    const allExports = exportAll(result);
-
-    const filesToDownload = exports.filter(e => selected.has(e.key));
-    let delay = 0;
-
-    for (const item of filesToDownload) {
-      const csv = allExports[item.key as keyof typeof allExports];
-      if (csv) {
-        setTimeout(() => {
-          downloadFile(csv, `bln-${item.key}-${timestamp}.csv`);
-        }, delay);
-        delay += 150;
-      }
-    }
-
-    // Also download summary JSON
-    setTimeout(() => {
-      downloadFile(allExports.summary, `bln-summary-${timestamp}.json`, 'application/json');
-    }, delay);
-
-    setDownloaded(new Set(exports.map(e => e.key)));
-  };
-
-  const totalRows = exports.filter(e => selected.has(e.key)).reduce((sum, e) => sum + e.count, 0);
-  const allDownloaded = exports.every(e => downloaded.has(e.key));
 
   return (
     <Card>
       <CardContent>
-        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-          <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
-            Export PRODUCE-Ready Files
-          </Typography>
-          <Chip
-            label={`${selected.size} files selected (${totalRows.toLocaleString()} rows)`}
-            color="primary"
-            variant="outlined"
-            size="small"
-          />
-        </Stack>
+        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+          Export PRODUCE-Ready Files
+        </Typography>
 
-        {/* File selection */}
-        <Box sx={{ mb: 2 }}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={selected.size === exports.length}
-                indeterminate={selected.size > 0 && selected.size < exports.length}
-                onChange={handleToggleAll}
-              />
-            }
-            label={<Typography variant="body2" sx={{ fontWeight: 600 }}>Select All</Typography>}
-          />
-          <Divider sx={{ my: 1 }} />
+        {/* Primary: Excel workbook (single file, no browser blocking) */}
+        <Box sx={{
+          p: 3,
+          borderRadius: 2,
+          backgroundColor: '#f0f7f0',
+          border: '1px solid #c8e6c9',
+          textAlign: 'center',
+          mb: 3,
+        }}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+            Recommended: Single Excel Workbook
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            All {exports.filter(e => e.count > 0).length} tables in one .xlsx file ({totalRows.toLocaleString()} total rows) — each on its own sheet.
+          </Typography>
+          <Button
+            variant="contained"
+            size="large"
+            startIcon={excelDownloaded ? <CheckCircleIcon /> : <TableViewIcon />}
+            onClick={handleDownloadExcel}
+            sx={{
+              px: 5,
+              py: 1.5,
+              backgroundColor: excelDownloaded ? '#2e7d32' : '#1565c0',
+              '&:hover': { backgroundColor: excelDownloaded ? '#1b5e20' : '#0d47a1' },
+            }}
+          >
+            {excelDownloaded ? 'Downloaded — Click to Re-download' : 'Download Excel Workbook'}
+          </Button>
+        </Box>
+
+        <Divider sx={{ my: 2 }}>
+          <Chip label="or download individual CSVs" size="small" />
+        </Divider>
+
+        {/* Secondary: Individual CSV downloads */}
+        <Stack spacing={0.5}>
           {exports.map((item) => (
-            <Stack key={item.key} direction="row" alignItems="center" sx={{ py: 0.5 }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={selected.has(item.key)}
-                    onChange={() => handleToggle(item.key)}
-                  />
-                }
-                label={
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Typography variant="body2">{item.label}</Typography>
-                    <Chip label={`${item.count.toLocaleString()} rows`} size="small" variant="outlined" sx={{ height: 20, fontSize: '0.7rem' }} />
-                    {downloaded.has(item.key) && (
-                      <CheckCircleIcon sx={{ color: '#2e7d32', fontSize: 16 }} />
-                    )}
-                  </Stack>
-                }
-                sx={{ flex: 1 }}
-              />
+            <Stack key={item.key} direction="row" alignItems="center" justifyContent="space-between" sx={{
+              py: 1,
+              px: 1.5,
+              borderRadius: 1,
+              '&:hover': { backgroundColor: '#f8f8f8' },
+            }}>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <Typography variant="body2" sx={{ fontWeight: 500 }}>{item.label}</Typography>
+                <Chip
+                  label={`${item.count.toLocaleString()} rows`}
+                  size="small"
+                  variant="outlined"
+                  sx={{ height: 20, fontSize: '0.7rem' }}
+                />
+                {csvDownloaded.has(item.key) && (
+                  <CheckCircleIcon sx={{ color: '#2e7d32', fontSize: 16 }} />
+                )}
+              </Stack>
               <Button
                 size="small"
                 startIcon={<DownloadIcon />}
-                onClick={() => handleDownloadSingle(item)}
+                onClick={() => handleDownloadSingleCSV(item)}
                 disabled={item.count === 0}
               >
                 CSV
               </Button>
             </Stack>
           ))}
-        </Box>
-
-        <Divider sx={{ my: 2 }} />
-
-        {/* Download All */}
-        <Stack direction="row" spacing={2} justifyContent="center">
-          <Button
-            variant="contained"
-            size="large"
-            startIcon={<FolderZipIcon />}
-            onClick={handleDownloadAll}
-            disabled={selected.size === 0}
-            sx={{
-              px: 4,
-              py: 1.5,
-              backgroundColor: '#2e7d32',
-              '&:hover': { backgroundColor: '#1b5e20' },
-            }}
-          >
-            Download {selected.size} Selected Files + Summary
-          </Button>
         </Stack>
 
-        {allDownloaded && (
+        {excelDownloaded && (
           <Alert severity="success" sx={{ mt: 2 }} icon={<CheckCircleIcon />}>
-            All files downloaded! Import these CSVs into PRODUCE.
+            Export complete! Import the file into PRODUCE.
           </Alert>
         )}
       </CardContent>
