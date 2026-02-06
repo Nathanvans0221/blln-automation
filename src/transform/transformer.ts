@@ -6,6 +6,7 @@ import type {
   Recipe,
   SpaceEvent,
   SpaceSpec,
+  RecipeMix,
   TransformResult,
 } from './types';
 
@@ -360,6 +361,137 @@ function generateSpecs(
 }
 
 /**
+ * Pick the best recipe for a given location, production item, and week
+ * "Best" = narrowest week window that covers the given week
+ *
+ * VBA equivalent: PickBestRecipe
+ */
+function pickBestRecipe(
+  recipes: Recipe[],
+  location: string,
+  productionItem: string,
+  week: number
+): Recipe | undefined {
+  let bestRecipe: Recipe | undefined;
+  let bestScore = 9999;
+
+  for (const recipe of recipes) {
+    // Match by location and production item (series)
+    if (recipe.locationCode !== location) continue;
+    if (recipe.series !== productionItem) continue;
+
+    // Check if week is in range
+    if (week < recipe.startWeek || week > recipe.endWeek) continue;
+
+    // Score = window width (narrower is better)
+    const score = recipe.endWeek - recipe.startWeek;
+    if (score < bestScore) {
+      bestScore = score;
+      bestRecipe = recipe;
+    }
+  }
+
+  return bestRecipe;
+}
+
+/**
+ * Generate recipe mixes from 4M Variant Mixes data
+ *
+ * VBA equivalent: GenerateMixBreakoutOutput
+ */
+function generateMixes(
+  data: ParsedData,
+  recipes: Recipe[],
+  catalogs: Catalog[]
+): { mixes: RecipeMix[]; warnings: string[] } {
+  const mixes: RecipeMix[] = [];
+  const warnings: string[] = [];
+  let id = 1;
+
+  if (data.mixRows.length === 0) {
+    return { mixes, warnings };
+  }
+
+  // Build catalog lookup by genus + variant
+  const catalogByVariant = new Map<string, number>();
+  for (const catalog of catalogs) {
+    const key = `${catalog.genus}|${catalog.series}|${catalog.color}`.toLowerCase();
+    catalogByVariant.set(key, catalog.id);
+  }
+
+  // Process each mix row
+  for (const mixRow of data.mixRows) {
+    if (mixRow.weeklyPcts.size === 0) continue;
+
+    // Group consecutive weeks with same percentage
+    const weekNums = Array.from(mixRow.weeklyPcts.keys()).sort((a, b) => a - b);
+    let currentPct = -1;
+    let startWeek = weekNums[0];
+
+    for (let i = 0; i <= weekNums.length; i++) {
+      const week = weekNums[i];
+      const pct = week !== undefined ? mixRow.weeklyPcts.get(week) ?? -1 : -1;
+
+      // Check if we hit a boundary (percentage change or end)
+      if (pct !== currentPct || i === weekNums.length) {
+        // Output previous segment if valid
+        if (currentPct > 0 && startWeek !== undefined) {
+          const endWeek = weekNums[i - 1] ?? startWeek;
+
+          // Find best recipe for this segment
+          const recipe = pickBestRecipe(
+            recipes,
+            mixRow.location,
+            mixRow.productionItem,
+            startWeek
+          );
+
+          if (recipe) {
+            // Try to find catalog by variant
+            let catalogId: number | undefined;
+            const variantKey = `${recipe.genus}|${mixRow.productionItem}|${mixRow.variantCode}`.toLowerCase();
+            catalogId = catalogByVariant.get(variantKey);
+
+            // Fallback: try just genus
+            if (!catalogId) {
+              for (const catalog of catalogs) {
+                if (catalog.genus.toLowerCase() === recipe.genus.toLowerCase()) {
+                  catalogId = catalog.id;
+                  break;
+                }
+              }
+            }
+
+            mixes.push({
+              id: id++,
+              recipeId: recipe.id,
+              catalogId: catalogId ?? 0,
+              mixPct: currentPct,
+              commonItem: mixRow.commonItem,
+              location: mixRow.location,
+              variant: mixRow.variantCode,
+              startWeek,
+              endWeek,
+              note: catalogId ? 'OK' : 'No Catalog',
+            });
+          } else {
+            warnings.push(
+              `No recipe found for ${mixRow.location}/${mixRow.productionItem} week ${startWeek}`
+            );
+          }
+        }
+
+        // Start new segment
+        currentPct = pct;
+        startWeek = week;
+      }
+    }
+  }
+
+  return { mixes, warnings };
+}
+
+/**
  * Main transform function
  * Takes parsed Arc Flow data and produces PRODUCE-ready output
  */
@@ -381,6 +513,7 @@ export function transform(data: ParsedData): TransformResult {
       recipes: [],
       events: [],
       specs: [],
+      mixes: [],
       errors,
       warnings,
     };
@@ -397,11 +530,16 @@ export function transform(data: ParsedData): TransformResult {
   const events = generateEvents(recipes, schemeDictionary);
   const specs = generateSpecs(recipes, data);
 
+  // Generate mixes from 4M Excel data
+  const { mixes, warnings: mixWarnings } = generateMixes(data, recipes, catalogs);
+  warnings.push(...mixWarnings);
+
   return {
     catalogs,
     recipes,
     events,
     specs,
+    mixes,
     errors,
     warnings,
   };

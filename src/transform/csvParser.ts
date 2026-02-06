@@ -163,6 +163,7 @@ export function parseAllFiles(files: { name: string; content: string }[]): Parse
     schemeLines: [],
     schemeLinePeriods: [],
     preferences: [],
+    mixRows: [],
   };
 
   for (const file of files) {

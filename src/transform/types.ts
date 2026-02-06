@@ -96,8 +96,31 @@ export interface TransformResult {
   recipes: Recipe[];
   events: SpaceEvent[];
   specs: SpaceSpec[];
+  mixes: RecipeMix[];
   errors: string[];
   warnings: string[];
+}
+
+// Mix data from 4M Variant Mixes Excel
+export interface MixRow {
+  location: string;
+  commonItem: string;
+  productionItem: string;
+  variantCode: string;
+  weeklyPcts: Map<number, number>; // week → percentage
+}
+
+export interface RecipeMix {
+  id: number;
+  recipeId: number;
+  catalogId: number;
+  mixPct: number;
+  commonItem: string;
+  location: string;
+  variant: string;
+  startWeek: number;
+  endWeek: number;
+  note: string;
 }
 
 export interface ParsedData {
@@ -105,4 +128,5 @@ export interface ParsedData {
   schemeLines: ProductionSchemeLine[];
   schemeLinePeriods: ProductionSchemeLinePeriod[];
   preferences: ProductionPreference[];
+  mixRows: MixRow[];
 }

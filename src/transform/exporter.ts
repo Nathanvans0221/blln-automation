@@ -1,4 +1,4 @@
-import type { TransformResult, Catalog, Recipe, SpaceEvent, SpaceSpec } from './types';
+import type { TransformResult, Catalog, Recipe, SpaceEvent, SpaceSpec, RecipeMix } from './types';
 
 /**
  * Convert array of objects to CSV string
@@ -83,6 +83,24 @@ export function exportSpecsCSV(specs: SpaceSpec[]): string {
 }
 
 /**
+ * Export mixes to CSV (PRODUCE RecipeMix format)
+ */
+export function exportMixesCSV(mixes: RecipeMix[]): string {
+  return toCSV(mixes, [
+    'id',
+    'recipeId',
+    'catalogId',
+    'mixPct',
+    'commonItem',
+    'location',
+    'variant',
+    'startWeek',
+    'endWeek',
+    'note',
+  ]);
+}
+
+/**
  * Create a zip-like bundle of all exports as a JSON object
  * (For browser download without actual zip library)
  */
@@ -91,6 +109,7 @@ export function exportAll(result: TransformResult): {
   recipes: string;
   events: string;
   specs: string;
+  mixes: string;
   summary: string;
 } {
   return {
@@ -98,6 +117,7 @@ export function exportAll(result: TransformResult): {
     recipes: exportRecipesCSV(result.recipes),
     events: exportEventsCSV(result.events),
     specs: exportSpecsCSV(result.specs),
+    mixes: exportMixesCSV(result.mixes),
     summary: JSON.stringify({
       timestamp: new Date().toISOString(),
       counts: {
@@ -105,6 +125,7 @@ export function exportAll(result: TransformResult): {
         recipes: result.recipes.length,
         events: result.events.length,
         specs: result.specs.length,
+        mixes: result.mixes.length,
       },
       errors: result.errors,
       warnings: result.warnings,
@@ -150,6 +171,10 @@ export function downloadAllExports(result: TransformResult, prefix = 'bln'): voi
   }, 300);
 
   setTimeout(() => {
-    downloadFile(exports.summary, `${prefix}-summary-${timestamp}.json`, 'application/json');
+    downloadFile(exports.mixes, `${prefix}-mixes-${timestamp}.csv`);
   }, 400);
+
+  setTimeout(() => {
+    downloadFile(exports.summary, `${prefix}-summary-${timestamp}.json`, 'application/json');
+  }, 500);
 }
