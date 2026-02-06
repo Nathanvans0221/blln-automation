@@ -303,85 +303,80 @@ export default function PipelineStepper({ pipeline }: PipelineStepperProps) {
         )}
       </Box>
 
-      {/* Navigation Bar */}
-      <Divider sx={{ my: 3 }} />
-      <Stack
-        direction="row"
-        justifyContent="space-between"
-        alignItems="center"
-        sx={{
-          p: 2,
-          borderRadius: 2,
-          backgroundColor: '#f8f9fa',
-        }}
-      >
-        <Box>
-          {activeStep > 0 && !pipeline.isTransforming && (
+      {/* Navigation Bar — shown on Validate, Transform (done), and Results steps */}
+      {activeStep > 0 && (
+        <>
+          <Divider sx={{ my: 3 }} />
+          <Stack
+            direction="row"
+            justifyContent="space-between"
+            alignItems="center"
+            sx={{
+              p: 2,
+              borderRadius: 2,
+              backgroundColor: '#f8f9fa',
+              border: '1px solid #e0e0e0',
+            }}
+          >
             <Button
               variant="outlined"
               size="large"
               startIcon={<ArrowBackIcon />}
               onClick={() => pipeline.setActiveStep(activeStep - 1)}
-              sx={{ minWidth: 160, fontWeight: 600 }}
+              disabled={pipeline.isTransforming}
+              sx={{ minWidth: 180, fontWeight: 600 }}
             >
-              {activeStep === 1 ? 'Back to Upload' : activeStep === 2 ? 'Back to Validate' : 'Back to Transform'}
+              Back: {STEP_LABELS[activeStep - 1]}
             </Button>
-          )}
-        </Box>
 
-        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-          Step {activeStep + 1} of {STEP_LABELS.length}: <strong>{STEP_LABELS[activeStep]}</strong>
-        </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+              Step {activeStep + 1} of {STEP_LABELS.length}: <strong>{STEP_LABELS[activeStep]}</strong>
+            </Typography>
 
-        <Box>
-          {activeStep === 0 && (
-            <Button
-              variant="contained"
-              size="large"
-              endIcon={<ArrowForwardIcon />}
-              onClick={handleProceedToValidate}
-              disabled={!pipeline.canProceedToValidate}
-              sx={{ minWidth: 200, fontWeight: 600, py: 1.2 }}
-            >
-              Validate Data
-            </Button>
-          )}
-          {activeStep === 1 && (
-            <Button
-              variant="contained"
-              size="large"
-              endIcon={<ArrowForwardIcon />}
-              onClick={handleRunTransform}
-              disabled={!pipeline.canTransform}
-              sx={{ minWidth: 200, fontWeight: 600, py: 1.2 }}
-            >
-              Run Transform
-            </Button>
-          )}
-          {activeStep === 2 && !pipeline.isTransforming && pipeline.hasResults && (
-            <Button
-              variant="contained"
-              size="large"
-              endIcon={<ArrowForwardIcon />}
-              onClick={() => pipeline.setActiveStep(3)}
-              sx={{ minWidth: 200, fontWeight: 600, py: 1.2 }}
-            >
-              View Results
-            </Button>
-          )}
-          {activeStep === 3 && (
-            <Button
-              variant="outlined"
-              size="large"
-              startIcon={<RestartAltIcon />}
-              onClick={pipeline.reset}
-              sx={{ minWidth: 160, fontWeight: 600 }}
-            >
-              Start Over
-            </Button>
-          )}
-        </Box>
-      </Stack>
+            <Box>
+              {activeStep === 1 && (
+                <Button
+                  variant="contained"
+                  size="large"
+                  endIcon={<ArrowForwardIcon />}
+                  onClick={handleRunTransform}
+                  disabled={!pipeline.canTransform}
+                  sx={{ minWidth: 220, fontWeight: 600, py: 1.2 }}
+                >
+                  Next: Run Transform
+                </Button>
+              )}
+              {activeStep === 2 && !pipeline.isTransforming && pipeline.hasResults && (
+                <Button
+                  variant="contained"
+                  size="large"
+                  endIcon={<ArrowForwardIcon />}
+                  onClick={() => pipeline.setActiveStep(3)}
+                  sx={{ minWidth: 220, fontWeight: 600, py: 1.2 }}
+                >
+                  Next: View Results
+                </Button>
+              )}
+              {activeStep === 2 && pipeline.isTransforming && (
+                <Button variant="contained" size="large" disabled sx={{ minWidth: 220, fontWeight: 600, py: 1.2 }}>
+                  Transforming...
+                </Button>
+              )}
+              {activeStep === 3 && (
+                <Button
+                  variant="contained"
+                  size="large"
+                  startIcon={<RestartAltIcon />}
+                  onClick={pipeline.reset}
+                  sx={{ minWidth: 220, fontWeight: 600, py: 1.2 }}
+                >
+                  Start New Transform
+                </Button>
+              )}
+            </Box>
+          </Stack>
+        </>
+      )}
 
       {/* Pipeline Info Footer */}
       {activeStep === 0 && (

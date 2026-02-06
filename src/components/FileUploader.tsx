@@ -144,6 +144,38 @@ export default function FileUploader({
         style={{ display: 'none' }}
       />
 
+      {/* Next Step Navigation */}
+      {uploadedFiles.length > 0 && (
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          alignItems="center"
+          sx={{
+            mb: 3,
+            p: 2,
+            borderRadius: 2,
+            backgroundColor: canProceedToValidate ? PRODUCE_COLORS.background : '#f5f5f5',
+            border: canProceedToValidate ? `1px solid ${PRODUCE_COLORS.primary}40` : '1px solid #e0e0e0',
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 500, color: canProceedToValidate ? 'text.primary' : 'text.secondary' }}>
+            {canProceedToValidate
+              ? `${uploadedFiles.length} file${uploadedFiles.length !== 1 ? 's' : ''} ready — proceed to validation`
+              : `Upload all required files to continue`}
+          </Typography>
+          <Button
+            variant="contained"
+            size="large"
+            endIcon={<ArrowForwardIcon />}
+            onClick={onProceed}
+            disabled={!canProceedToValidate}
+            sx={{ minWidth: 200, fontWeight: 600, py: 1 }}
+          >
+            Next: Validate Data
+          </Button>
+        </Stack>
+      )}
+
       {/* Required Files Checklist + Uploaded Files */}
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={3}>
         {/* Required Files */}
@@ -275,32 +307,17 @@ export default function FileUploader({
         </Card>
       </Stack>
 
-      {/* Status & Proceed */}
+      {/* Status Alerts */}
       <Box sx={{ mt: 3 }}>
         {!hasAllArcFlow && uploadedFiles.length > 0 && (
-          <Alert severity="warning" sx={{ mb: 2 }}>
+          <Alert severity="warning">
             Missing {4 - arcFlowFileStatus.filter(f => f.present).length} required Arc Flow file(s):
             {' '}{arcFlowFileStatus.filter(f => !f.present).map(f => f.name).join(', ')}
           </Alert>
         )}
         {hasAllArcFlow && !hasExcel && (
-          <Alert severity="info" sx={{ mb: 2 }}>
+          <Alert severity="info">
             All Arc Flow files detected. The 4M Variant Mixes Excel is optional — add it if you need mix breakout data.
-          </Alert>
-        )}
-        {canProceedToValidate && (
-          <Alert severity="success" sx={{ mb: 2 }} action={
-            <Button
-              color="inherit"
-              size="small"
-              endIcon={<ArrowForwardIcon />}
-              onClick={onProceed}
-              sx={{ fontWeight: 600 }}
-            >
-              Validate Data
-            </Button>
-          }>
-            Ready to proceed! Click to parse and validate your data.
           </Alert>
         )}
       </Box>
