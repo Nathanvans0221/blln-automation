@@ -12,6 +12,7 @@ import {
 } from '@mui/material';
 import { PRODUCE_COLORS } from '../theme/produceTheme';
 import DataTable from './DataTable';
+import ComparisonView from './ComparisonView';
 import type { ColumnDef } from './DataTable';
 import type { TransformResult } from '../transform/types';
 
@@ -205,6 +206,11 @@ export default function ResultsViewer({ result, duration }: ResultsViewerProps) 
           )}
         </CardContent>
       </Card>
+
+      {/* Comparison Section */}
+      <Box sx={{ mt: 4 }}>
+        <ComparisonView result={result} />
+      </Box>
     </Box>
   );
 }

@@ -162,22 +162,32 @@ function mergeGrowAndSpace(rules: SchemeRule[]): SchemeRule[] {
 }
 
 /**
- * Generate catalogs from schemes
- * Each unique genus becomes a catalog entry
+ * Generate catalogs from preferences + schemes
+ * Each unique genus+series+color becomes a catalog entry
  */
 function generateCatalogs(data: ParsedData): Catalog[] {
   const catalogs: Catalog[] = [];
-  const seenGenus = new Set<string>();
+  const seen = new Set<string>();
   let id = 1;
 
+  // Build scheme → genus map
+  const schemeGenusMap = new Map<string, string>();
   for (const scheme of data.schemes) {
-    if (!seenGenus.has(scheme.genusCode)) {
-      seenGenus.add(scheme.genusCode);
+    schemeGenusMap.set(scheme.code, scheme.genusCode);
+  }
+
+  // Create catalog entries from preferences (genus + productionItemNo + variantCode)
+  for (const pref of data.preferences) {
+    const genus = schemeGenusMap.get(pref.schemeCode) || '';
+    const key = `${genus}|${pref.productionItemNo}|${pref.variantCode}`;
+
+    if (!seen.has(key) && genus) {
+      seen.add(key);
       catalogs.push({
         id: id++,
-        genus: scheme.genusCode,
-        series: '', // Extracted from 4M number if available
-        color: '', // Extracted from variant code if available
+        genus,
+        series: pref.productionItemNo,
+        color: pref.variantCode,
       });
     }
   }
@@ -199,10 +209,10 @@ function generateRecipes(
   const warnings: string[] = [];
   let id = 1;
 
-  // Build genus → catalog map
-  const genusCatalogMap = new Map<string, number>();
+  // Build genus+series+color → catalog map
+  const catalogMap = new Map<string, number>();
   for (const catalog of catalogs) {
-    genusCatalogMap.set(catalog.genus, catalog.id);
+    catalogMap.set(`${catalog.genus}|${catalog.series}|${catalog.color}`, catalog.id);
   }
 
   // Build scheme → genus map
@@ -225,7 +235,7 @@ function generateRecipes(
 
     const genus = schemeGenusMap.get(schemeCode) || '';
     const { category } = parseSchemeCode(schemeCode);
-    const catalogId = genusCatalogMap.get(genus);
+    const catalogId = catalogMap.get(`${genus}|${pref.productionItemNo}|${pref.variantCode}`);
 
     // Merge phases and create recipe for each segment
     const mergedRules = mergeGrowAndSpace(rules);
